@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    /* Base Options */
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+
+    /* Native Execution Constraints */
+    "noEmit": true, // Node runs TS directly; we don't need output files
+    "erasableSyntaxOnly": true, // ERRORS if you use Enums or Namespaces (Vital for Node 24)
+    "verbatimModuleSyntax": true, // Enforces strict import/export syntax
+    "allowImportingTsExtensions": true, // Allows 'import x from "./file.ts"'
+    "rewriteRelativeImportExtensions": true,
+
+    /* Strictness */
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"]
+}

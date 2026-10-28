@@ -1,0 +1,15 @@
+# Dependencies (recreated by `npm install`)
+node_modules/
+
+# Secrets: your API key lives here, never commit it
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS and editor files
+.DS_Store
+.vscode/
+.idea/
