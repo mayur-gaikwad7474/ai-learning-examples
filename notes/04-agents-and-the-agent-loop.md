@@ -244,8 +244,8 @@ The agent takes hooks into the loop. These are the ones for this lesson:
 | `onStepEnd` | After each step | Log the step's tool calls, results and tokens |
 | `prepareStep` | Before each step | **Change** the next step: the model, which tools are available, the messages |
 
-Your [server.ts](../src/server.ts) logs steps with `onStepFinish`. In `ai@7`, that's a deprecated alias
-for `onStepEnd`; it still works, but use `onStepEnd` in new code.
+Your [conversation.service.ts](../src/services/conversation.service.ts) logs steps with `onStepEnd`. In `ai@7`,
+`onStepFinish` is a deprecated alias for it; it still works, but use `onStepEnd` in new code.
 
 `prepareStep` receives the steps so far and can return overrides for the next step. For example, to
 stop the model scheduling a second post after one succeeded:
