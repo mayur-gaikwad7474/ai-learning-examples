@@ -34,7 +34,7 @@ When a lesson's boxes are all ticked, tick it in **Progress** below.
 - [x] 0. Prerequisites (complete or demonstrate existing knowledge)
 - [x] 1. How LLMs work
 - [x] 2. Prompts and messages
-- [ ] 3. Tools
+- [x] 3. Tools
 - [ ] 4. Agents and the agent loop
 - [ ] 5. Structured output
 - [ ] 6. Preventing infinite loops
@@ -135,12 +135,12 @@ Already comfortable with these topics? Demonstrate the **Done when** checks and 
 ## 3. Tools
 
 **Learn**
-- [ ] What a tool is (description, input schema, execute)
-- [ ] The model asks, your code runs it
-- [ ] The description decides when it's used
-- [ ] Short tool results
-- [ ] Returning errors the model can recover from
-- [ ] Designing a few task-shaped tools
+- [x] What a tool is (description, input schema, execute)
+- [x] The model asks, your code runs it
+- [x] The description decides when it's used
+- [x] Short tool results
+- [x] Returning errors the model can recover from
+- [x] Designing a few task-shaped tools
 - [ ] Eval cases, code assertions and pass rate: passing cases divided by total cases
 - [ ] Checking tool selection separately from answer quality
 
@@ -190,11 +190,16 @@ and investigate failures rather than weakening assertions to make them pass. Les
 held-out cases and model judges.
 
 **Done when**
-- [ ] You can explain the full journey of a tool call
-- [ ] You can write a description that makes the model use the tool at the right time
+- [x] You can explain the full journey of a tool call
+- [x] You can write a description that makes the model use the tool at the right time
 - [ ] Your eval file reports a pass count for at least 5 cases and exits with a nonzero code on failure
 - [ ] Deliberately changing an expected tool name makes a case fail; restoring it restores the check
 - [ ] You record a baseline and can explain what each assertion does and does not measure
+
+**Record (2026-10-29):** marked done with tools only. Built against the real Creatosaurus services
+instead of the weather agent: `currentTimeTool`, `accountListTool`, `postSchedularTool` and `listPostsTool`
+in `src/tools/`, wired up in `src/agents/postSchedular.agent.ts`. The eval items (`evals/agent.eval.ts`,
+5+ cases, baseline) are deferred; pick them up before or during lesson 17.
 
 ## 4. Agents and the agent loop
 

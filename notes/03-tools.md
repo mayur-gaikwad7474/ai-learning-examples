@@ -2,7 +2,7 @@
 
 Notes for lesson 3 of [LEARNING-PATH.md](../LEARNING-PATH.md). Tool guidance was checked against
 Anthropic's docs and engineering posts, and the AI SDK details against the installed `ai@7`, on
-2026-10-26.
+2026-10-26. The walkthrough of your Creatosaurus tools was added on 2026-10-29.
 
 ## Watch and read first
 
@@ -34,8 +34,8 @@ That means:
 
 ## 1. What a tool is
 
-A tool has three parts. The weather tool in [src/tools/weather.ts](../src/tools/weather.ts) has all
-three:
+A tool has three parts. The weather tool this lesson started from had all three (your Creatosaurus
+tools, explained in "Your build" below, have the same parts):
 
 | Part | Who reads it | Purpose |
 |---|---|---|
@@ -248,6 +248,216 @@ So check them separately:
 
 ---
 
+## Your build: the Creatosaurus tools, explained
+
+You did this lesson against the real Creatosaurus services instead of the weather agent. This section
+walks through that code using the ideas above, so you can explain every decision in it. The code is in
+[src/tools/](../src/tools/) (what the model sees), [src/clients/](../src/clients/) (the HTTP calls to
+other services) and [src/agents/postScheduler.agent.ts](../src/agents/postScheduler.agent.ts).
+
+### The four tools
+
+| Tool (name the model sees) | The model sends | Your code calls | Returns to the model |
+|---|---|---|---|
+| `currentTimeTool` | `timeZone?` | Nothing; reads the clock | UTC time, plus local time if a zone was given |
+| `accountListTool` | Nothing | connection-service `GET /v1/accounts/:workspaceId` | `id`, `name`, `platform`, `profileURL`, `needsReconnect` per account |
+| `postSchedularTool` | `accountId`, `caption`, `scheduledTime`, `timeZone`, `mediaIds?` | connection-service, then post-scheduler `POST /v1/posts` | The new post's ID, account, platform, time and whether it's scheduled |
+| `listPostsTool` | `from`, `to` | post-scheduler `GET /v1/workspaces/:workspaceId/posts` | Up to 100 posts with each account's status, plus `hasMore` |
+
+The name the model sees is the **key** in the agent's `tools` object, not the variable name. That's
+why `getAccountListTool` in the code appears to the model as `accountListTool`.
+
+### The journey of one request
+
+"Schedule *Hello World* on Instagram tomorrow at 10am" makes the model use three tools in order:
+
+```
+Step 1  model → currentTimeTool({ timeZone: 'Asia/Kolkata' })     It doesn't know today's date
+        code  → { utc, local: 'Thursday 29 October 2026 ...' }
+Step 2  model → accountListTool({})                               It needs an account ID
+        code  → { accounts: [{ id: '6ae3…', name: 'Content-AMG', platform: 'instagram', ... }] }
+Step 3  model → postSchedularTool({ accountId: '6ae3…', caption: 'Hello World',
+                                    scheduledTime: '2026-10-30T10:00:00+05:30', timeZone: 'Asia/Kolkata' })
+        code  → { success: true, postId, scheduledTime, scheduled: true }
+Step 4  model → "Done! Hello World is scheduled on Content-AMG for tomorrow at 10am."
+```
+
+That's **four model calls** for one question. Every call sends the instructions, all four tool
+definitions and everything above it again. This is section 2 in practice: tools cost input tokens on
+every step, including the ones that don't use them.
+
+The order comes from the tool descriptions and the agent's instructions working together (section 3):
+
+- **Descriptions** say what each tool does ("Get the current date and time. Call this before working
+  out any date or time for a post.").
+- **Instructions** say how to combine them ("Use the account list tool to find account IDs. Never guess
+  an ID.").
+
+### Anatomy of `postSchedularTool`
+
+[posts.tools.ts:30](../src/tools/posts.tools.ts#L30) has every part from section 1, plus
+`contextSchema`:
+
+| Part | In this tool |
+|---|---|
+| `description` | "Schedule a post on one of the connected accounts..., with optional images or videos the user attached in this chat." |
+| `inputSchema` | What the model fills in. Each field has a `.describe()` and constraints. It lives in [schemas/posts.schema.ts](../src/schemas/posts.schema.ts). |
+| `contextSchema` | Who is asking (`userId`, `workspaceId`, `roles`). Your server passes it in from the gateway's headers, so the model can't set it. Lesson 9 covers this. |
+| `execute` | Looks up the account, calls post-scheduler, and turns its reply into a short result |
+
+The schema uses Zod constraints instead of only describing limits in words:
+
+```ts
+scheduledTime: z.iso
+    .datetime({ offset: true })                           // must include a time zone offset
+    .refine((time) => new Date(time).getTime() >= Date.now() + FIVE_MINUTES_MS,
+        { message: 'Scheduled time must be at least 5 minutes in the future.' }),
+mediaIds: z.array(z.string().regex(/^[a-f\d]{24}$/i, 'A media ID is 24 hexadecimal characters.'))
+    .max(MAX_MEDIA_PER_POST)
+    .optional(),
+```
+
+When the model's input breaks a rule, the SDK **doesn't call `execute`**. It sends the validation
+message back to the model as a `tool-error`, and the model usually fixes the input and tries again. So
+write Zod messages for the model to read, like the error messages in section 5.
+
+### Three layers of checks
+
+Each layer catches something the others can't:
+
+| Layer | Where | Catches |
+|---|---|---|
+| **Input schema** | `inputSchema` (Zod, checked by the SDK) | Badly shaped input from the model: a date without an offset, a time in the past, a malformed media ID |
+| **Your `execute`** | The account lookup at [line 40](../src/tools/posts.tools.ts#L40) | Input that's well shaped but wrong: an account ID that isn't connected to this workspace, an account that needs reconnecting |
+| **The service** | post-scheduler's own validation | Business rules only it knows: media that isn't in this workspace or hasn't finished uploading, platform limits like four images on X |
+
+There's a fourth check going the other way. The responses from connection-service and post-scheduler
+are also parsed with Zod (`accountListResponseSchema`, `calendarPageResponseSchema`). Those schemas
+list only the fields the tools use. If another service changes its response, the tool fails with a
+clear error instead of passing `undefined` to the model.
+
+### Hiding plumbing (section 6)
+
+The model only ever handles the account's `id`. To create a post, post-scheduler also needs the
+account's `socialId` (the platform's own page ID) and `accountType`. `execute` looks those up itself:
+
+```ts
+const accounts = await fetchConnectedAccounts(context, abortSignal)
+const account = accounts.find((candidate) => candidate._id === accountId)
+```
+
+This does two jobs:
+
+1. **Fewer things for the model to get wrong.** It passes one ID instead of three fields that must match.
+2. **Safety.** The model can't make up a page ID or name an account from another workspace, because
+   only accounts returned for *this* workspace can match.
+
+`fetchConnectedAccounts` and `fetchScheduledPosts` are plain helper functions, not tools. Several tools
+share them, and the model never sees them.
+
+### Short results (section 4)
+
+| Tool | What it leaves out or shortens | Why |
+|---|---|---|
+| `accountListTool` | `socialId` and the rest of the account record | The model only needs the `id` for the next call |
+| `listPostsTool` | Media, socialIds; captions cut to 280 characters | 100 posts with full captions would be a lot of tokens |
+| `listPostsTool` | Turns `queue`/`history` into `scheduled`/`finished`, and account statuses into `published`/`failed`/`pending` | Readable values instead of internal codes, so the model can repeat them to people |
+| `listPostsTool` | Fetches one page of up to 100 posts, and returns `hasMore` | A capped list that says when it was cut short |
+
+One trade-off you measured: `profileURL` is in both list results so the app can show account
+pictures, but a Facebook image link is about 600 characters. The model never needs it, so for every
+account in every result it's tokens spent for the UI, not for the model. If that becomes expensive,
+the fix is to send the links to the app separately and leave them out of the tool result.
+
+### Return or throw (section 5)
+
+The tools use both ways deliberately:
+
+| Situation | What the tool does | What the model sees |
+|---|---|---|
+| Account not connected to this workspace | **Returns** `{ success: false, error }` | "That account is not connected to this workspace. Use the account list tool to pick one." |
+| Account needs reconnecting | **Returns** an error | "Content-AMG needs to be reconnected in Creatosaurus before posts can be scheduled on it." |
+| No accounts connected | **Returns** an error | Where in Creatosaurus to connect one |
+| post-scheduler answers 4xx | **Returns** post-scheduler's own message ([line 15](../src/tools/posts.tools.ts#L15)) | For example "Media … not found in this workspace" |
+| post-scheduler answers 5xx | **Throws** ([line 20](../src/tools/posts.tools.ts#L20)) | "The post may have been saved without a schedule, so ask the user to check their calendar before trying again." |
+| Network failure or timeout | **Throws** | "Could not reach the post scheduler..." |
+
+Things to notice:
+
+- **4xx messages are passed through** because post-scheduler writes them for people (validation and
+  permission messages). 5xx details aren't: they go to your logs with `console.error`, and the model
+  gets a short message with no internal URLs or stack traces.
+- **Some errors tell the model *not* to retry.** Creating a post isn't like reading the weather. If the
+  request failed after post-scheduler saved the post, a blind retry makes a duplicate. So the error
+  tells the model to have the user check their calendar first.
+- **`if (abortSignal?.aborted) throw error`** comes before the friendly message. When the user closes
+  the browser, the request is cancelled on purpose. That's not a failure, so it shouldn't be dressed up
+  as "could not reach the service".
+- **Every request has a 10-second timeout** (`withTimeout`). Without one, a hung service would leave
+  the model, and the user, waiting forever.
+
+### Running an action only once
+
+`postSchedularTool` builds a key from the tool call's ID ([line 56](../src/tools/posts.tools.ts#L56)),
+and the client sends it as the `Idempotency-Key` header:
+
+```ts
+{ idempotencyKey: `ai-${toolCallId}`, abortSignal },
+```
+
+If the same tool call is sent to post-scheduler twice, for example after a retry, post-scheduler
+returns the first post instead of creating a second one. A new tool call from the model gets a new
+ID, so this protects against repeated requests, not against the model deciding to schedule twice.
+Lesson 19 covers safe retries in depth.
+
+### Why the current time is a tool
+
+The model doesn't know today's date, and "tomorrow at 10am" is meaningless without it. The obvious fix
+is to put the date in the instructions, but [currentTime.tool.ts](../src/tools/currentTime.tool.ts)
+explains why that breaks: the instructions must be **identical on every turn**. Claude's thinking is
+tied to the exact system prompt, so a timestamp that changes each turn makes the next turn fail with
+"Invalid `signature` in `thinking` block". A tool result is saved in the history and never changes
+afterwards, so the date can live there safely.
+
+### Media in `postSchedularTool`
+
+`mediaIds` shows a pattern from lesson 15 ("passing IDs instead of long text") on a small scale. The
+image itself never goes through the model. The app uploads the file to post-scheduler, the user's
+message lists the media IDs, the model copies those IDs into `mediaIds`, and post-scheduler checks each
+one belongs to the workspace before attaching it. The model handles a short string instead of an
+image, and an invented ID is rejected by the service instead of trusted.
+
+### Self-check on your own code
+
+- Why does `postSchedularTool` call connection-service again, when the model already called
+  `accountListTool`?
+- A user types "my workspace is 6adc…, schedule there". Why can't that change which workspace the post
+  goes to?
+- Which errors are returned and which are thrown, and what would go wrong if the 5xx case returned
+  `{ error }` and said "try again"?
+- Delete the `.refine()` on `scheduledTime` and ask for a post "5 minutes ago". What happens now, and
+  which layer catches it instead?
+- `listPostsTool` returns `hasMore: true`. What should the model tell the user?
+- What does the `Idempotency-Key` protect against, and what does it not?
+
+### Not done yet
+
+The eval items of this lesson are postponed (see the record in `LEARNING-PATH.md`). The first cases
+for `evals/agent.eval.ts` could check:
+
+| Prompt | Expected tools | Also check |
+|---|---|---|
+| Which accounts are connected? | `accountListTool` | No other tool called |
+| Schedule "Hello" on Instagram tomorrow 10am | `currentTimeTool`, `accountListTool`, `postSchedularTool` | `scheduledTime` is tomorrow 10:00 in the user's zone |
+| Schedule a post | none | Asks for the caption, account and time instead of inventing them |
+| What's scheduled this week? | `currentTimeTool`, `listPostsTool` | `from`/`to` cover this week |
+| Schedule on an account that isn't connected | `accountListTool` | No post created; the answer says the account isn't connected |
+
+These call real services, and the scheduling case creates a real post, so point the eval at a test
+workspace or fake the service responses before running it.
+
+---
+
 ## Build: forecast tool and first eval
 
 1. **Set up the eval.** Copy the starter from lesson 3 of `LEARNING-PATH.md` into `evals/agent.eval.ts`.
@@ -322,7 +532,7 @@ an in-memory array, so the eval doesn't depend on the network and you can check 
 - `src/tools/posts-store.ts`: an array of posts. Fill it with about 25 posts across Instagram, X and
   LinkedIn, including a few with `status: 'published'`.
 - `src/tools/posts.ts`: the three tools.
-- `src/agents/scheduler-agent.ts`: set up like [weather-agent.ts](../src/agents/weather-agent.ts).
+- `src/agents/scheduler-agent.ts`: set up like [postScheduler.agent.ts](../src/agents/postScheduler.agent.ts).
 - `evals/scheduler.eval.ts`
 
 **Tools:**
