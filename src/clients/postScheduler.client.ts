@@ -1,9 +1,13 @@
 // post-scheduler-service owns posts and their schedules.
 import type { Identity } from '../schemas/identity.schema.ts';
-import type { ConnectedAccount } from '../schemas/accounts.schema.ts';
 import {
   calendarPageResponseSchema,
   createdPostResponseSchema,
+  updatedPostResponseSchema,
+} from '../schemas/posts.schema.ts';
+import type {
+  NewScheduledPost,
+  ScheduledPostChanges,
 } from '../schemas/posts.schema.ts';
 import { createServiceClient } from './http.ts';
 
@@ -15,14 +19,6 @@ const request = createServiceClient({
 
 // post-scheduler's most posts per calendar page.
 const CALENDAR_MAX_LIMIT = 100;
-
-export type NewScheduledPost = {
-  account: Pick<ConnectedAccount, 'socialId' | 'accountType' | 'name'>;
-  caption: string;
-  mediaIds: string[];
-  scheduleTime: string;
-  timeZone: string;
-};
 
 // Builds the legacy post body the app's post editor sends: the same media goes on the post and on
 // its one account. `idempotencyKey` makes a retried request return the first post instead of
@@ -59,6 +55,41 @@ export const createScheduledPost = async (
     },
     abortSignal: options.abortSignal,
   });
+  return body.data;
+};
+
+// Sends only the fields that change; post-scheduler keeps the rest. A new caption or new media
+// also sends customizedEach: false. Without it, a post with its own caption and media per account
+// keeps those, and post-scheduler answers 200 without changing anything.
+export const updateScheduledPost = async (
+  identity: Identity,
+  postId: string,
+  changes: ScheduledPostChanges,
+  abortSignal?: AbortSignal,
+) => {
+  const { caption, mediaIds, scheduleTime, timeZone } = changes;
+
+  const body = await request(
+    `/v1/posts/${encodeURIComponent(postId)}`,
+    updatedPostResponseSchema,
+    {
+      identity,
+      method: 'PATCH',
+      body: {
+        workspaceId: identity.workspaceId,
+        ...(caption !== undefined && { draftMessage: caption }),
+        ...(mediaIds !== undefined && {
+          draftMedia: mediaIds.map((mediaId) => ({ mediaId })),
+        }),
+        ...((caption !== undefined || mediaIds !== undefined) && {
+          customizedEach: false,
+        }),
+        ...(scheduleTime !== undefined && { scheduleTime }),
+        ...(timeZone !== undefined && { timeZone }),
+      },
+      abortSignal,
+    },
+  );
   return body.data;
 };
 

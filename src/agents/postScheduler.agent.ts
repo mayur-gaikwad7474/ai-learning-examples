@@ -2,7 +2,7 @@ import { ToolLoopAgent } from 'ai';
 import { model } from '../model.ts';
 import type { Identity } from '../schemas/identity.schema.ts';
 import { listAccounts } from '../tools/accounts.tools.ts';
-import { listPosts, schedulePost } from '../tools/posts.tools.ts';
+import { editPost, listPosts, schedulePost } from '../tools/posts.tools.ts';
 import { currentTime } from '../tools/currentTime.tool.ts';
 
 // Must be exactly the same on every turn of a conversation, so nothing here may change per request.
@@ -30,11 +30,13 @@ export const createPostAgent = (identity: Identity) =>
       accountList: listAccounts,
       currentTime: currentTime,
       listPosts: listPosts,
+      editPost: editPost,
     },
     toolsContext: {
       postSchedular: identity,
       accountList: identity,
       listPosts: identity,
+      editPost: identity,
     },
 
     onStepStart({ stepNumber, modelId }) {

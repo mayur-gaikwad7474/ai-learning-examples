@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { identitySchema } from '../schemas/identity.schema.ts';
 import {
   CALENDAR_MAX_WINDOW_DAYS,
+  editPostInputSchema,
   listPostsInputSchema,
   schedulePostInputSchema,
 } from '../schemas/posts.schema.ts';
@@ -10,6 +11,7 @@ import { fetchConnectedAccounts } from '../clients/connections.client.ts';
 import {
   createScheduledPost,
   fetchScheduledPosts,
+  updateScheduledPost,
 } from '../clients/postScheduler.client.ts';
 
 // What to tell the model when creating a post failed. A 4xx message is written for people
@@ -96,6 +98,74 @@ export const schedulePost = tool({
       platform: account.accountType,
       scheduledTime: created.scheduleTime,
       scheduled: created.scheduled,
+    };
+  },
+});
+
+// What to tell the model when an edit failed. A 4xx message is written for people (post not
+// found, already published, view-only role), so it goes back as a normal result. Otherwise the
+// change may already be saved, so the model must not simply try again.
+const explainEditFailure = (
+  error: unknown,
+): { success: false; error: string } => {
+  if (!(error instanceof ServiceError)) throw error;
+
+  switch (error.kind) {
+    case 'rejected':
+      return { success: false, error: error.message };
+    case 'unreachable':
+      throw new Error(
+        'Could not reach the post scheduler. The change may or may not have been saved, so ask the user to check the post in their calendar before trying again.',
+      );
+    case 'failed':
+      // post-scheduler removes the old schedule before saving a new time, so a failure part-way
+      // can leave the post without one.
+      throw new Error(
+        `The post scheduler failed (status ${error.status}). The change may be partly saved, and a post whose time was changed may no longer be scheduled. Ask the user to check the post in their calendar before trying again.`,
+      );
+    case 'unreadable':
+      throw new Error(
+        'The post scheduler sent a response that could not be read. Ask the user to check the post in their calendar.',
+      );
+  }
+};
+
+export const editPost = tool({
+  description: [
+    'Change the caption, publish time or media of a scheduled or draft post in the current workspace. Posts that are published or publishing cannot be edited. Also if the post is scheduled if we have to edit then it should be more than 5 minutes from now then only it can be editable or else we will reject it to edit.',
+    'Get the post ID from the list posts tool; never guess one. Send only what the user wants to change.',
+    "A new caption or new media replaces it on every account of the post. If the post's accounts have different captions, tell the user they will all get the same caption and ask before editing.",
+  ].join(' '),
+  inputSchema: editPostInputSchema,
+  contextSchema: identitySchema,
+  execute: async (
+    { postId, caption, scheduledTime, timeZone, mediaIds },
+    { context, abortSignal },
+  ) => {
+    let updated;
+    try {
+      updated = await updateScheduledPost(
+        context,
+        postId,
+        {
+          caption,
+          mediaIds,
+          scheduleTime: scheduledTime && new Date(scheduledTime).toISOString(),
+          timeZone,
+        },
+        abortSignal,
+      );
+    } catch (error) {
+      return explainEditFailure(error);
+    }
+
+    return {
+      success: true,
+      postId: updated.id,
+      status: updated.status === 'draft' ? 'draft' : 'scheduled',
+      scheduledTime: updated.scheduleTime,
+      timeZone: updated.timeZone,
+      scheduled: updated.scheduled,
     };
   },
 });
