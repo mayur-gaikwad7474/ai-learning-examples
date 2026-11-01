@@ -60,14 +60,14 @@ export const schedulePost = tool({
 
     if (!account) {
       return {
-        success: false,
+        success: false as const,
         error:
           'That account is not connected to this workspace. Use the account list tool to pick one.',
       };
     }
     if (account.isAccountTokensExpired) {
       return {
-        success: false,
+        success: false as const,
         error: `${account.name} needs to be reconnected in Creatosaurus before posts can be scheduled on it.`,
       };
     }
@@ -92,10 +92,12 @@ export const schedulePost = tool({
     }
 
     return {
-      success: true,
+      success: true as const,
       postId: created.id,
       account: account.name,
       platform: account.accountType,
+      // For the app's confirmation card, like listAccounts. Older accounts can have no image.
+      profileURL: account.profileURL || null,
       scheduledTime: created.scheduleTime,
       scheduled: created.scheduled,
     };
@@ -160,9 +162,12 @@ export const editPost = tool({
     }
 
     return {
-      success: true,
+      success: true as const,
       postId: updated.id,
-      status: updated.status === 'draft' ? 'draft' : 'scheduled',
+      status:
+        updated.status === 'draft'
+          ? ('draft' as const)
+          : ('scheduled' as const),
       scheduledTime: updated.scheduleTime,
       timeZone: updated.timeZone,
       scheduled: updated.scheduled,
@@ -189,6 +194,26 @@ const shortenCaption = (caption: string) =>
     ? `${caption.slice(0, MAX_CAPTION_LENGTH)}…`
     : caption;
 
+type CalendarPost = Awaited<
+  ReturnType<typeof fetchScheduledPosts>
+>['items'][number];
+
+// Every media file in the post, once, as the calendar shows it: accounts can share files, and a
+// draft with no accounts keeps its media on the post itself.
+const mediaOf = (post: CalendarPost) => {
+  const accountMedia = post.accounts.flatMap(
+    (account) => account.mediaURL ?? [],
+  );
+  const media =
+    accountMedia.length > 0 ? accountMedia : (post.draftMedia ?? []);
+  const unique = new Map(media.map((file) => [file.mediaId, file]));
+  return [...unique.values()].map((file) => ({
+    mediaId: file.mediaId,
+    URL: file.url,
+    type: file.type,
+  }));
+};
+
 export const listPosts = tool({
   description: [
     `Get the posts of the current workspace in Creatosaurus between two dates, with the publish status on each account. Use it to check that a post was scheduled, or to answer questions about upcoming or past posts.`,
@@ -201,13 +226,14 @@ export const listPosts = tool({
   execute: async ({ from, to }, { context, abortSignal }) => {
     const page = await fetchScheduledPosts(context, from, to, abortSignal);
 
-    // Give the model what it needs to talk about a post, plus the profile image so the app can
-    // show post cards. socialIds and media stay out.
+    // What the model needs to talk about a post, plus what the app's post cards show (profile
+    // images and media). socialIds stay out. toModelOutput below trims this for the model.
     const posts = page.items.map((post) => ({
       id: post.id,
       status: POST_STATUS_LABELS[post.status] ?? post.status,
       scheduledTime: post.scheduleTime,
       timeZone: post.timeZone,
+      media: mediaOf(post),
       accounts: post.accounts.map((account) => ({
         name: account.name,
         platform: account.accountType,
@@ -220,6 +246,21 @@ export const listPosts = tool({
     }));
 
     // An empty range is a normal answer, not a failure.
-    return { success: true, posts, hasMore: page.hasMore };
+    return { success: true as const, posts, hasMore: page.hasMore };
   },
+
+  // What the model sees, instead of the full output above. The media URLs are long and only the
+  // app needs them, so the model gets each file's type ("image", "video"), which is enough to say
+  // "the post with two images". The full output still reaches services/displayParts.ts for the
+  // cards, and only this version is saved in the conversation's model history.
+  toModelOutput: ({ output }) => ({
+    type: 'json',
+    value: {
+      ...output,
+      posts: output.posts.map((post) => ({
+        ...post,
+        media: post.media.map((file) => file.type),
+      })),
+    },
+  }),
 });

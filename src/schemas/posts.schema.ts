@@ -1,6 +1,7 @@
 // Schemas for posts. Inputs are what the model sends to a tool; requests are what our client
 // sends to post-scheduler-service; outputs are what it answers.
 import { z } from 'zod';
+import { showToUserSchema } from './accounts.schema.ts';
 import type { ConnectedAccount } from './accounts.schema.ts';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
@@ -93,6 +94,7 @@ export const listPostsInputSchema = z
     to: z.iso
       .datetime({ offset: true })
       .describe('End of the range, as an ISO 8601 date-time.'),
+    showToUser: showToUserSchema,
   })
   .refine(({ from, to }) => new Date(from) <= new Date(to), {
     message: 'from must be before to.',
@@ -149,6 +151,13 @@ export const updatedPostResponseSchema = z.object({
   }),
 });
 
+// One media file on a calendar post. `type` is image, video or pdf.
+const calendarMediaSchema = z.object({
+  mediaId: z.string(),
+  url: z.string(),
+  type: z.string(),
+});
+
 // The calendar endpoint still returns the legacy post shape the app's calendar uses.
 export const calendarPageResponseSchema = z.object({
   data: z.object({
@@ -159,6 +168,8 @@ export const calendarPageResponseSchema = z.object({
         scheduleTime: z.string().nullable(),
         timeZone: z.string().nullable(),
         draftMessage: z.string().nullish(),
+        // The media of a draft that has no accounts yet.
+        draftMedia: z.array(calendarMediaSchema).nullish(),
         accounts: z.array(
           z.object({
             name: z.string(),
@@ -168,6 +179,8 @@ export const calendarPageResponseSchema = z.object({
             status: z.string(),
             postUrl: z.string().nullish(),
             error: z.string().nullish(),
+            // The account's own media, or the post's default media when it has none.
+            mediaURL: z.array(calendarMediaSchema).nullish(),
           }),
         ),
       }),

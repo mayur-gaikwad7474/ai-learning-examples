@@ -2,7 +2,10 @@
 // saved in MongoDB.
 import { Schema, model } from 'mongoose';
 import type { Types } from 'mongoose';
+import type { InferToolOutput } from 'ai';
 import { z } from 'zod';
+import type { listAccounts } from '../tools/accounts.tools.ts';
+import type { listPosts } from '../tools/posts.tools.ts';
 
 // The most media one post takes on any platform (Instagram and LinkedIn carousels).
 const MAX_ATTACHMENTS = 10;
@@ -39,12 +42,55 @@ export const sendMessageBodySchema = z
 export type Attachment = z.infer<typeof attachmentSchema>;
 export type SendMessageBody = z.infer<typeof sendMessageBodySchema>;
 
+// ── Display parts (what the app renders) ────────────────────────────────────────────────────────
+// An assistant answer is a list of parts in the order they happened: text the model wrote, and
+// cards built from tool results. The app picks a component for each `type`. Card data is the
+// tool's own output, so it shows exactly what our services returned, never the model's retelling.
+
+type SuccessOutput<T> = Extract<T, { success: true }>;
+type AccountsOutput = SuccessOutput<InferToolOutput<typeof listAccounts>>;
+type PostsOutput = SuccessOutput<InferToolOutput<typeof listPosts>>;
+
+export type DisplayPart =
+  | { type: 'text'; text: string }
+  | { type: 'accounts'; accounts: AccountsOutput['accounts'] }
+  | { type: 'posts'; posts: PostsOutput['posts']; hasMore: boolean }
+  // Confirmation after a post was created. `scheduled` is false when post-scheduler saved the post
+  // but could not create its publish schedule.
+  | {
+      type: 'scheduledPost';
+      postId: string;
+      account: { name: string; platform: string; profileURL: string | null };
+      caption: string;
+      mediaCount: number;
+      scheduledTime: string | null;
+      timeZone: string;
+      scheduled: boolean;
+    }
+  // Confirmation after a post was edited, with only what changed. null means "not changed".
+  | {
+      type: 'editedPost';
+      postId: string;
+      status: 'draft' | 'scheduled';
+      scheduledTime: string | null;
+      timeZone: string | null;
+      scheduled: boolean;
+      changes: {
+        caption: string | null;
+        time: boolean;
+        mediaCount: number | null;
+      };
+    };
+
 // ── Database (MongoDB) ──────────────────────────────────────────────────────────────────────────
 
 export type DisplayMessage = {
   _id: Types.ObjectId;
   role: 'user' | 'assistant';
+  // The answer's text alone. Kept so an app that does not read `parts` yet still works.
   text: string;
+  // Missing on messages saved before parts existed, and on the user's own messages.
+  parts?: DisplayPart[];
   attachments: Attachment[];
   createdAt: Date;
 };
@@ -52,6 +98,8 @@ export type DisplayMessage = {
 const displayMessageSchema = new Schema<DisplayMessage>({
   role: { type: String, enum: ['user', 'assistant'], required: true },
   text: { type: String, default: '' },
+  // Each part has its own shape, set by DisplayPart above, so MongoDB stores them as they are.
+  parts: { type: [Schema.Types.Mixed], default: undefined },
   attachments: [
     new Schema(
       {

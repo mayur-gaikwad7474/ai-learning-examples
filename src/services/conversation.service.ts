@@ -8,6 +8,7 @@ import type {
   SendMessageBody,
 } from '../schemas/conversation.schema.ts';
 import { createPostAgent } from '../agents/postScheduler.agent.ts';
+import { toDisplayParts } from './displayParts.ts';
 import { HttpError } from '../middleware/errorHandler.ts';
 
 const LIST_LIMIT = 50;
@@ -27,10 +28,13 @@ const toSummary = (conversation: ConversationSummary) => ({
   updatedAt: conversation.updatedAt,
 });
 
+// Messages saved before parts existed get their text as the only part, so the app can always read
+// `parts` and never has to handle both shapes.
 const toDisplay = (message: DisplayMessage) => ({
   id: String(message._id),
   role: message.role,
   text: message.text,
+  parts: message.parts ?? [{ type: 'text', text: message.text }],
   attachments: message.attachments,
   createdAt: message.createdAt,
 });
@@ -183,6 +187,7 @@ export const sendMessage = async (
       _id: new Types.ObjectId(),
       role: 'assistant',
       text: result.text,
+      parts: toDisplayParts(result.steps),
       attachments: [],
       createdAt: new Date(),
     };

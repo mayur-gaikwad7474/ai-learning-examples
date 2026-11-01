@@ -139,12 +139,13 @@ Already comfortable with these topics? Demonstrate the **Done when** checks and 
 - [x] The model asks, your code runs it
 - [x] The description decides when it's used
 - [x] Short tool results
+- [x] `toModelOutput`: what the model sees vs what your code gets from the same tool result
 - [x] Returning errors the model can recover from
 - [x] Designing a few task-shaped tools
 - [ ] Eval cases, code assertions and pass rate: passing cases divided by total cases
 - [ ] Checking tool selection separately from answer quality
 
-**AI SDK:** `tool({ description, inputSchema, execute })`, zod `.describe()`, `result.toolCalls`,
+**AI SDK:** `tool({ description, inputSchema, execute, toModelOutput })`, zod `.describe()`, `result.toolCalls`,
 `result.toolResults`.
 
 **Build**
@@ -200,6 +201,10 @@ held-out cases and model judges.
 instead of the weather agent: `currentTimeTool`, `accountListTool`, `postSchedularTool` and `listPostsTool`
 in `src/tools/`, wired up in `src/agents/postSchedular.agent.ts`. The eval items (`evals/agent.eval.ts`,
 5+ cases, baseline) are deferred; pick them up before or during lesson 17.
+
+**Record (2026-11-01):** `listPosts` in `src/tools/posts.tools.ts` has a `toModelOutput`. The post cards get
+each media file's URL from the full output; the model, and the history saved for it, get only the file types
+(`"media": ["image"]`).
 
 ## 4. Agents and the agent loop
 
@@ -285,6 +290,7 @@ in `src/tools/`, wired up in `src/agents/postSchedular.agent.ts`. The eval items
 - [ ] Models remember nothing between calls
 - [ ] Sending history every turn
 - [ ] UI messages vs model messages
+- [x] Saving display parts next to the model history, with a fallback for messages saved before parts existed
 - [ ] Saving and resuming threads
 - [ ] Keeping threads per user
 - [ ] Why long threads get expensive
@@ -297,6 +303,10 @@ in `src/tools/`, wired up in `src/agents/postSchedular.agent.ts`. The eval items
 **Done when**
 - [ ] You can explain why relevant history must be supplied on each call, and why it need not include every past turn
 - [ ] You can save and resume a thread
+
+**Record (2026-11-01):** each conversation in MongoDB keeps `messages` (the model history, never sent to the
+browser) and `display` (what people see). Assistant answers in `display` now save `parts`; answers saved
+before that get `[{ type: 'text', text }]` in `toDisplay` (`src/services/conversation.service.ts`).
 
 ## 9. Runtime context
 
@@ -543,11 +553,15 @@ switch models per step.
 **Learn**
 - [ ] Serving a streaming agent over HTTP
 - [ ] A chat UI with tool progress and approval buttons
+- [x] Generative UI: the model marks what to show (`showToUser`), the server builds typed parts from
+  `result.steps`, and the app maps each part type to a component
+- [ ] Streaming those parts live with `useChat` tool parts, showing loading, done and error states
 - [ ] Saving threads and approvals in a database
 - [ ] Config from environment variables
 - [ ] Auth, limits and rollout
 
-**AI SDK:** `toUIMessageStreamResponse()`, `pipeUIMessageStreamToResponse()`, `useChat`, `convertToModelMessages`.
+**AI SDK:** `toUIMessageStreamResponse()`, `pipeUIMessageStreamToResponse()`, `useChat`, `convertToModelMessages`,
+`UIMessage` tool parts (`tool-${toolName}` with states `input-available`, `output-available`, `output-error`).
 
 **Build**
 - [ ] The weather agent behind an Express endpoint with streaming, and a small React chat page with an approval button.
@@ -555,6 +569,12 @@ switch models per step.
 **Done when**
 - [ ] You can serve a streaming agent over HTTP
 - [ ] You can build a chat UI that shows tool progress
+
+**Record (2026-11-01):** built without streaming, for the post agent. Server: `showToUserSchema` in
+`src/schemas/accounts.schema.ts`, `toDisplayParts` in `src/services/displayParts.ts`, and the "don't repeat the
+cards" instructions in `src/agents/postScheduler.agent.ts`. App (`app-creatosaurus/src/modules/assistant/`):
+`PART_COMPONENTS` in `components/MessagePart.jsx`, with `AccountCards`, `PostCards` and
+`PostConfirmationCards`. Video: `ai-roadmap/lesson-generative-ui.mp4`.
 
 ---
 

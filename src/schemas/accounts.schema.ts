@@ -4,7 +4,18 @@ import { z } from 'zod';
 
 // ── Inputs (tools) ──────────────────────────────────────────────────────────────────────────────
 
-export const listAccountsInputSchema = z.object({});
+// The model calls a list tool for two reasons: the user wants to see the list, or the model needs
+// it for another step (finding an account ID). Only the model knows which, so it says so here.
+// The app shows the result as cards only when this is true.
+export const showToUserSchema = z
+  .boolean()
+  .describe(
+    'true when the user asked to see these results. false when you only need them for another step, such as finding an account ID before scheduling.',
+  );
+
+export const listAccountsInputSchema = z.object({
+  showToUser: showToUserSchema,
+});
 
 // ── Outputs (connection-service) ────────────────────────────────────────────────────────────────
 // We only read the fields we use, and check them, because these responses come from other services.

@@ -26,12 +26,14 @@ export const listAccounts = tool({
 
     if (accounts.length === 0) {
       return {
-        success: false,
+        success: false as const,
         error:
           'No social accounts are connected to this workspace. Connect one in Creatosaurus under Brand & Social Accounts first.',
       };
     }
 
-    return { success: true, accounts };
+    // `as const` keeps `success` as the literal true/false instead of `boolean`, so code that reads
+    // the output (services/displayParts.ts) can check `success` and know which shape it has.
+    return { success: true as const, accounts };
   },
 });
