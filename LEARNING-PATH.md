@@ -35,7 +35,7 @@ When a lesson's boxes are all ticked, tick it in **Progress** below.
 - [x] 1. How LLMs work
 - [x] 2. Prompts and messages
 - [x] 3. Tools
-- [ ] 4. Agents and the agent loop
+- [x] 4. Agents and the agent loop
 - [ ] 5. Structured output
 - [ ] 6. Preventing infinite loops
 - [ ] 7. Streaming
@@ -209,10 +209,10 @@ each media file's URL from the full output; the model, and the history saved for
 ## 4. Agents and the agent loop
 
 **Learn**
-- [ ] The loop (think → call a tool → read the result → repeat → answer)
-- [ ] Steps
-- [ ] Workflow vs agent, and when each is better
-- [ ] Instructions as the agent's job description
+- [x] The loop (think → call a tool → read the result → repeat → answer)
+- [x] Steps
+- [x] Workflow vs agent, and when each is better
+- [x] Instructions as the agent's job description
 
 **AI SDK:** `new ToolLoopAgent({ model, instructions, tools, stopWhen })`, `agent.generate()`, `result.steps`,
 `prepareStep`, `onStepEnd`.
@@ -221,9 +221,14 @@ each media file's URL from the full output; the model, and the history saved for
 - [ ] A "post idea" agent with `getWeather` and a fake `getTrendingTopics`. Then build the same thing as a fixed workflow and compare.
 
 **Done when**
-- [ ] You can draw the agent loop
-- [ ] You can choose between a workflow and an agent for a task
-- [ ] You can read `result.steps` and explain what happened
+- [x] You can draw the agent loop
+- [x] You can choose between a workflow and an agent for a task
+- [x] You can read `result.steps` and explain what happened
+
+**Record (2026-11-02):** marked done. The Build exercise (post idea agent vs workflow) was skipped; the loop,
+steps and hooks were practised on the post scheduler agent instead: `ToolLoopAgent` in
+`src/agents/postScheduler.agent.ts`, `onStepEnd` logging in `src/services/conversation.service.ts`, and
+`result.steps` turned into display parts in `src/services/displayParts.ts`.
 
 ## 5. Structured output
 
