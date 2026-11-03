@@ -11,7 +11,8 @@
     "start": "node --env-file=.env src/main.ts",
     "server": "node --watch --env-file=.env src/server.ts",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write src"
+    "format": "prettier --write src",
+    "eval": "node --env-file=.env evals/agent.eval.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.88",
