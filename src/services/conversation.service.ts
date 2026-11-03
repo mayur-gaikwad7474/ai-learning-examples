@@ -5,11 +5,21 @@ import { ConversationModel } from '../schemas/conversation.schema.ts';
 import type {
   Attachment,
   DisplayMessage,
+  DisplayPart,
   SendMessageBody,
 } from '../schemas/conversation.schema.ts';
 import { createPostAgent } from '../agents/postScheduler.agent.ts';
-import { toDisplayParts } from './displayParts.ts';
+import { toCardPart, toDisplayParts } from './displayParts.ts';
 import { HttpError } from '../middleware/errorHandler.ts';
+
+// What the app sees while the agent works: which tool is running, the text as it is written, and
+// each card as soon as its tool returns. The finished answer is sent separately, once it is saved.
+export type AgentEvent =
+  | { type: 'progress'; toolName: string }
+  | { type: 'text'; text: string }
+  | { type: 'card'; part: DisplayPart };
+
+export type SendEvent = (event: AgentEvent) => void;
 
 const LIST_LIMIT = 50;
 const MAX_TITLE_LENGTH = 60;
@@ -75,13 +85,22 @@ const toTitle = (text: string, attachments: Attachment[]) => {
     : text;
 };
 
+const agentFailed = (error: unknown) => {
+  console.error('[conversation] the agent failed:', error);
+  return new HttpError(502, 'The assistant could not reply. Please try again.');
+};
+
+// Streams the run to `send` as it happens, then returns the same values `generate` would.
+// A stream does not throw when the model fails halfway: the failure arrives as an `error` part,
+// so it is turned into a throw here, and the turn is not saved.
 const runAgent = async (
   identity: Identity,
   messages: ModelMessage[],
   abortSignal: AbortSignal,
+  send: SendEvent,
 ) => {
   try {
-    return await createPostAgent(identity).generate({
+    const result = await createPostAgent(identity).stream({
       messages,
       abortSignal,
       onStepEnd: (step) => {
@@ -93,13 +112,30 @@ const runAgent = async (
         }
       },
     });
+
+    for await (const part of result.stream) {
+      if (part.type === 'text-delta') send({ type: 'text', text: part.text });
+      else if (part.type === 'tool-input-start')
+        send({ type: 'progress', toolName: part.toolName });
+      else if (part.type === 'tool-result') {
+        const card = toCardPart(part);
+        if (card) send({ type: 'card', part: card });
+      } else if (part.type === 'error') {
+        abortSignal.throwIfAborted();
+        throw agentFailed(part.error);
+      }
+    }
+    // A cancelled run ends the stream with an `abort` part instead of an error.
+    abortSignal.throwIfAborted();
+
+    return {
+      text: await result.text,
+      steps: await result.steps,
+      responseMessages: await result.responseMessages,
+    };
   } catch (error) {
-    if (abortSignal.aborted) throw error;
-    console.error('[conversation] the agent failed:', error);
-    throw new HttpError(
-      502,
-      'The assistant could not reply. Please try again.',
-    );
+    if (abortSignal.aborted || error instanceof HttpError) throw error;
+    throw agentFailed(error);
   }
 };
 
@@ -138,11 +174,13 @@ export const getConversation = async (identity: Identity, id: string) => {
 
 // Loads the saved history, adds the new message, runs the agent and saves both sides of the turn.
 // The browser sends only the new message, so it cannot change what the model saw before.
+// Nothing is sent before the lock is taken, so a 404 or 409 still reaches the app as a plain error.
 export const sendMessage = async (
   identity: Identity,
   id: string,
   body: SendMessageBody,
   abortSignal: AbortSignal,
+  send: SendEvent,
 ) => {
   const owner = { _id: id, ...ownedBy(identity) };
   const sentAt = new Date();
@@ -170,6 +208,7 @@ export const sendMessage = async (
       identity,
       [...(conversation.messages as ModelMessage[]), userMessage],
       abortSignal,
+      send,
     );
 
     const title =

@@ -4,6 +4,8 @@
 //   POST /v1/conversations                 start a new one
 //   GET  /v1/conversations/:id             one conversation, as the messages to show
 //   POST /v1/conversations/:id/messages    body: { text, attachments }  →  { title, message }
+//                                          or, with Accept: application/x-ndjson, one event per line
+//                                          (progress, text, card) ending in done or error
 //
 // The app sends only the new message. The server keeps the full model history and adds each turn.
 import express from 'express';

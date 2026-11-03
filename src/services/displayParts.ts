@@ -6,15 +6,18 @@
 //   - list results the model marked showToUser: true, as card parts
 //   - posts it scheduled or edited, as confirmation cards
 // Everything else (results it only needed for another step, failed calls, other tools) stays out.
-import type { StepResult } from 'ai';
+import type { StepResult, TypedToolResult } from 'ai';
 import type { PostAgentTools } from '../agents/postScheduler.agent.ts';
 import type { DisplayPart } from '../schemas/conversation.schema.ts';
 
 type PostAgentStep = StepResult<PostAgentTools>;
-type StepContent = PostAgentStep['content'][number];
 
-const toCardPart = (part: StepContent): DisplayPart | null => {
-  if (part.type !== 'tool-result' || part.dynamic) return null;
+// A finished step's content and a live stream both carry tool results in this shape, so the same
+// card is built either way: from `steps` after the run, or from `result.stream` as it happens.
+type ToolResultPart = { type: 'tool-result' } & TypedToolResult<PostAgentTools>;
+
+export const toCardPart = (part: ToolResultPart): DisplayPart | null => {
+  if (part.dynamic) return null;
 
   // Checking toolName lets TypeScript know the exact input and output of that tool.
   if (part.toolName === 'accountList') {
@@ -88,6 +91,7 @@ export const toDisplayParts = (steps: PostAgentStep[]): DisplayPart[] => {
         continue;
       }
 
+      if (content.type !== 'tool-result') continue;
       const card = toCardPart(content);
       if (card) parts.push(card);
     }
