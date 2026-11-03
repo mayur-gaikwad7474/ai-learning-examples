@@ -36,8 +36,8 @@ When a lesson's boxes are all ticked, tick it in **Progress** below.
 - [x] 2. Prompts and messages
 - [x] 3. Tools
 - [x] 4. Agents and the agent loop
-- [ ] 5. Structured output
-- [ ] 6. Preventing infinite loops
+- [x] 5. Structured output
+- [x] 6. Preventing infinite loops
 - [ ] 7. Streaming
 - [ ] 8. Conversational threads
 - [ ] 9. Runtime context
@@ -233,11 +233,11 @@ steps and hooks were practised on the post scheduler agent instead: `ToolLoopAge
 ## 5. Structured output
 
 **Learn**
-- [ ] Why code needs data, not paragraphs
-- [ ] Object, array, choice and JSON outputs
-- [ ] Describing fields
-- [ ] What happens when output doesn't validate
-- [ ] Tools plus structured output
+- [x] Why code needs data, not paragraphs
+- [x] Object, array, choice and JSON outputs
+- [x] Describing fields
+- [x] What happens when output doesn't validate
+- [x] Tools plus structured output
 
 **AI SDK:** `generateText({ output: Output.object({ schema }) })`, `Output.array`, `Output.choice`,
 `Output.json`, `result.output`. (`generateObject` is deprecated.)
@@ -246,19 +246,23 @@ steps and hooks were practised on the post scheduler agent instead: `ToolLoopAge
 - [ ] An inbox message classifier: first `Output.choice(['spam', 'sales lead', 'question', 'praise'])`, then `Output.object` returning `{ category, confidence, reason }`.
 
 **Done when**
-- [ ] You can choose the right output type for a task
-- [ ] You know what to do when output fails validation
+- [x] You can choose the right output type for a task
+- [x] You know what to do when output fails validation
+
+**Record (2026-11-03):** marked done from the notes in `notes/05-structured-output.md`. The Build exercise
+(inbox classifier) was skipped; the project has no `Output` usage yet, so `result.output`,
+`NoObjectGeneratedError` and `NoOutputGeneratedError` haven't been tried in code.
 
 ## 6. Preventing infinite loops
 
 **Learn**
-- [ ] Why agents loop
-- [ ] Step limits
-- [ ] Stop conditions
-- [ ] Token, cost and time budgets
-- [ ] Timeouts
-- [ ] Controlling which tools are allowed per step
-- [ ] Detecting repeated calls
+- [x] Why agents loop
+- [x] Step limits
+- [x] Stop conditions
+- [x] Token, cost and time budgets
+- [x] Timeouts
+- [x] Controlling which tools are allowed per step
+- [x] Detecting repeated calls
 
 **AI SDK:** `stopWhen: isStepCount(n)` (default 20), `hasToolCall()`, `isLoopFinished()`, custom
 `StopCondition`, `toolChoice`, `activeTools`, `timeout`, `abortSignal`.
@@ -267,8 +271,12 @@ steps and hooks were practised on the post scheduler agent instead: `ToolLoopAge
 - [ ] A broken tool that always says "try again". Stop the loop three ways: a step limit, a "same call twice" rule, and a token budget. Make the user always get a friendly message.
 
 **Done when**
-- [ ] You can name three causes of runaway loops
-- [ ] You can stop an agent by steps, by a rule and by budget
+- [x] You can name three causes of runaway loops
+- [x] You can stop an agent by steps, by a rule and by budget
+
+**Record (2026-11-03):** marked done from the notes in `notes/06-preventing-infinite-loops.md`. The Build
+exercise (the "try again" tool stopped three ways) was skipped. The post agent still has no `stopWhen` or
+`timeout`: it relies on the default 20 steps, and the gateway's 130s is its only time limit.
 
 ## 7. Streaming
 
