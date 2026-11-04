@@ -7,9 +7,8 @@ const router = Router();
 router.use(requireIdentity);
 
 router.get('/', conversationController.listConversations);
-router.post('/', conversationController.createConversation);
 router.get('/:id', conversationController.getConversation);
+// A new message, or the user's Approve/Deny on the last answer. Both continue the conversation.
 router.post('/:id/messages', conversationController.sendMessage);
-router.post('/:id/approvals', conversationController.answerApproval);
 
 export default router;

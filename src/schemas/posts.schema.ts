@@ -21,11 +21,14 @@ const objectIdSchema = z
 // invented or foreign ID is rejected there and comes back to the model as an error.
 const mediaIdsSchema = z.array(objectIdSchema).max(MAX_MEDIA_PER_POST);
 
-const futureDateTimeSchema = z.iso
-  .datetime({ offset: true })
-  .refine((time) => new Date(time).getTime() >= Date.now() + FIVE_MINUTES_MS, {
-    message: 'Scheduled time must be at least 5 minutes in the future.',
-  });
+// Only the format is checked here. useChat sends the whole conversation through the AI SDK's checks
+// again on every turn, including every old tool call's input, so a rule that depends on the current
+// time ("at least 5 minutes from now") would break old conversations. The tools check it instead.
+const dateTimeSchema = z.iso.datetime({ offset: true });
+
+// post-scheduler refuses to schedule or move a post into the next 5 minutes.
+export const isAtLeastFiveMinutesAway = (time: string) =>
+  new Date(time).getTime() >= Date.now() + FIVE_MINUTES_MS;
 
 // ── Inputs (tools) ──────────────────────────────────────────────────────────────────────────────
 
@@ -46,7 +49,7 @@ export const schedulePostInputSchema = z.object({
     .describe(
       'IDs of media the user attached in this conversation, in the order to post them. Only use IDs listed under "Attached media".',
     ),
-  scheduledTime: futureDateTimeSchema.describe(
+  scheduledTime: dateTimeSchema.describe(
     'The time at which the post should be scheduled, as an ISO 8601 date-time.',
   ),
 });
@@ -63,7 +66,7 @@ export const editPostInputSchema = z
       .min(1)
       .optional()
       .describe('The new caption. It replaces the caption on every account.'),
-    scheduledTime: futureDateTimeSchema
+    scheduledTime: dateTimeSchema
       .optional()
       .describe('The new publish time, as an ISO 8601 date-time.'),
     timeZone: z

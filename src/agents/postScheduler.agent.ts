@@ -24,9 +24,9 @@ const INSTRUCTIONS = [
   "also your work is to assist based on the tools you available and we don't have to entertain user with any other information that is not related to the tools and the task at hand.",
 ].join('\n');
 
-// The keys are the tool names the model sees. They are saved in every conversation's history, and
-// services/displayParts.ts reads them to build the account and post cards. Rename the variables
-// freely, but change a key only together with displayParts.ts.
+// The keys are the tool names the model sees. They are saved in every conversation, and the app's
+// chat picks a card for each tool part by them (tool-accountList, tool-listPosts, ...). Rename the
+// variables freely, but change a key only together with the app's MessagePart.jsx.
 const tools = {
   postSchedular: schedulePost,
   accountList: listAccounts,

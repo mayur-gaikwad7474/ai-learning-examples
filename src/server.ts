@@ -1,13 +1,13 @@
-// The agent behind an HTTP API, so the app can chat with it. Conversations are saved in MongoDB:
+// The agent behind an HTTP API, so the app's chat (the AI SDK's useChat) can talk to it.
+// Conversations are saved in MongoDB:
 //
 //   GET  /v1/conversations                 the signed-in person's past conversations, newest first
-//   POST /v1/conversations                 start a new one
-//   GET  /v1/conversations/:id             one conversation, as the messages to show
-//   POST /v1/conversations/:id/messages    body: { text, attachments }  →  { title, message }
-//                                          or, with Accept: application/x-ndjson, one event per line
-//                                          (progress, text, card) ending in done or error
+//   GET  /v1/conversations/:id             one conversation, as the UI messages useChat shows
+//   POST /v1/conversations/:id/messages    body: { message }  →  the answer, streamed in the AI SDK's
+//                                          UI message format. The first message creates the
+//                                          conversation; an Approve or Deny is sent here too.
 //
-// The app sends only the new message. The server keeps the full model history and adds each turn.
+// The app sends only the newest message. The server keeps the conversation and adds each turn.
 import express from 'express';
 import { connectToDatabase } from './db.ts';
 import conversationRoutes from './routes/conversation.routes.ts';

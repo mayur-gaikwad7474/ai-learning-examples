@@ -33,7 +33,7 @@ export const listAccounts = tool({
     }
 
     // `as const` keeps `success` as the literal true/false instead of `boolean`, so code that reads
-    // the output (services/displayParts.ts) can check `success` and know which shape it has.
+    // the output (the app's account cards) can check `success` and know which shape it has.
     return { success: true as const, accounts };
   },
 });

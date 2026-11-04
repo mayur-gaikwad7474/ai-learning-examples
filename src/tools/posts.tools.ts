@@ -5,6 +5,7 @@ import {
   CALENDAR_MAX_WINDOW_DAYS,
   deletePostInputSchema,
   editPostInputSchema,
+  isAtLeastFiveMinutesAway,
   listPostsInputSchema,
   schedulePostInputSchema,
 } from '../schemas/posts.schema.ts';
@@ -56,6 +57,13 @@ export const schedulePost = tool({
     { accountId, timeZone, caption, scheduledTime, mediaIds },
     { context, abortSignal, toolCallId },
   ) => {
+    if (!isAtLeastFiveMinutesAway(scheduledTime)) {
+      return {
+        success: false as const,
+        error: 'The time must be at least 5 minutes from now.',
+      };
+    }
+
     // Look the account up ourselves: post-scheduler needs its socialId and accountType, and the
     // model must not be able to invent a page ID or use another workspace's account.
     const accounts = await fetchConnectedAccounts(context, abortSignal);
@@ -147,6 +155,13 @@ export const editPost = tool({
     { postId, caption, scheduledTime, timeZone, mediaIds },
     { context, abortSignal },
   ) => {
+    if (scheduledTime && !isAtLeastFiveMinutesAway(scheduledTime)) {
+      return {
+        success: false as const,
+        error: 'The new time must be at least 5 minutes from now.',
+      };
+    }
+
     let updated;
     try {
       updated = await updateScheduledPost(
@@ -307,8 +322,8 @@ export const listPosts = tool({
 
   // What the model sees, instead of the full output above. The media URLs are long and only the
   // app needs them, so the model gets each file's type ("image", "video"), which is enough to say
-  // "the post with two images". The full output still reaches services/displayParts.ts for the
-  // cards, and only this version is saved in the conversation's model history.
+  // "the post with two images". The full output is still saved in the conversation and streamed to
+  // the app for its post cards; this version is only what the model reads.
   toModelOutput: ({ output }) => ({
     type: 'json',
     value: {
