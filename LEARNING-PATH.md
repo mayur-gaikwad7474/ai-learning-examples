@@ -38,7 +38,7 @@ When a lesson's boxes are all ticked, tick it in **Progress** below.
 - [x] 4. Agents and the agent loop
 - [x] 5. Structured output
 - [x] 6. Preventing infinite loops
-- [ ] 7. Streaming
+- [x] 7. Streaming
 - [ ] 8. Conversational threads
 - [ ] 9. Runtime context
 - [ ] 10. Context engineering and memory
@@ -281,21 +281,28 @@ exercise (the "try again" tool stopped three ways) was skipped. The post agent s
 ## 7. Streaming
 
 **Learn**
-- [ ] Why streaming feels faster
-- [ ] Text stream vs full event stream
-- [ ] Showing tool progress
-- [ ] Sending a stream to a browser
-- [ ] Cancelling
+- [x] Why streaming feels faster
+- [x] Text stream vs full event stream
+- [x] Showing tool progress
+- [x] Sending a stream to a browser
+- [x] Cancelling
 
 **AI SDK:** `streamText`, `agent.stream()`, `result.textStream`, `result.fullStream`, `smoothStream`,
 `toUIMessageStreamResponse()`.
 
 **Build**
-- [ ] Stream the weather agent in the terminal, printing words as they arrive and `[calling getWeather…]` when a tool starts.
+- [x] Stream the weather agent in the terminal, printing words as they arrive and `[calling getWeather…]` when a tool starts.
 
 **Done when**
-- [ ] You can explain `textStream` vs `fullStream`
-- [ ] You can show tool progress while streaming
+- [x] You can explain `textStream` vs `fullStream`
+- [x] You can show tool progress while streaming
+
+**Record (2026-11-04):** marked done from the notes in `notes/07-streaming.md`. The Build was done in the app
+instead of the terminal: `src/services/conversation.service.ts` reads the post agent's full stream
+(`agent.stream()`, `result.stream`) and sends text, tool progress and cards as NDJSON
+(`src/controllers/conversation.controller.ts`, with `X-Accel-Buffering: no` for the gateway). The app shows
+a label while each tool runs, and its Stop button closes the request, which aborts the run. `textStream` and
+`smoothStream` are not used.
 
 ## 8. Conversational threads
 
