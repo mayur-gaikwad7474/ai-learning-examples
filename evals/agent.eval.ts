@@ -16,15 +16,22 @@ import {
   type PostAgentTools,
 } from '../src/agents/postScheduler.agent.ts';
 import type { Identity } from '../src/schemas/identity.schema.ts';
+import { ServiceError } from '../src/clients/http.ts';
+import { fetchConnectedAccounts } from '../src/clients/connections.client.ts';
+import {
+  createScheduledPost,
+  deleteScheduledPost,
+} from '../src/clients/postScheduler.client.ts';
 
 // The keys in postScheduler.agent.ts. A misspelled tool name in a case is a type error, instead of a
 // check that silently never fails.
 type ToolName = keyof PostAgentTools;
 
-// Tools that change real data. These evals run against real services, so every case forbids them,
-// and a case that requires one is refused before anything runs. Lesson 17 swaps in fake tools so
-// scheduling and editing can be tested too.
-const WRITE_TOOLS: ToolName[] = ['postSchedular', 'editPost'];
+// Tools that change real data. These evals run against real services, so no case may run them, and
+// a case that requires one is refused before anything runs. Lesson 17 swaps in fake tools so
+// scheduling and editing can be tested too. deletePost is called but never runs here: it waits for
+// the user's approval, which an eval never gives. So this list is checked against what ran.
+const WRITE_TOOLS: ToolName[] = ['postSchedular', 'editPost', 'deletePost'];
 
 // Who the agent acts as. The tools send this to the services, the same way the gateway would.
 const identity: Identity = {
@@ -38,10 +45,51 @@ if (!identity.userId || !identity.workspaceId) {
   process.exit(1);
 }
 
+// A throwaway post for the delete case, 30 days from now at 10:00 India time. The eval creates it
+// before the case and deletes it afterwards, so the case never depends on real posts, and even a
+// broken approval could only delete this one.
+const FIXTURE_CAPTION = 'EVAL-FIXTURE: safe to delete';
+const fixtureDay = new Date(Date.now() + 30 * 86_400_000)
+  .toISOString()
+  .slice(0, 10);
+
+// Creates the fixture post and returns the cleanup that deletes it. If the post is already gone at
+// cleanup, the agent deleted it without waiting for approval, and the case fails.
+const createFixturePost = async () => {
+  const accounts = await fetchConnectedAccounts(identity);
+  const account = accounts.find((candidate) => !candidate.isAccountTokensExpired);
+  if (!account) throw new Error('The delete case needs one connected account.');
+
+  const post = await createScheduledPost(
+    identity,
+    {
+      account,
+      caption: FIXTURE_CAPTION,
+      mediaIds: [],
+      scheduleTime: `${fixtureDay}T04:30:00.000Z`,
+      timeZone: 'Asia/Kolkata',
+    },
+    { idempotencyKey: `eval-fixture-${crypto.randomUUID()}` },
+  );
+
+  return async () => {
+    try {
+      await deleteScheduledPost(identity, post.id);
+    } catch (error) {
+      if (error instanceof ServiceError && error.status === 404) {
+        throw new Error('The fixture post was already deleted: deletePost ran without approval.');
+      }
+      throw error;
+    }
+  };
+};
+
 // What one run of the agent did, handed to a case's `check`.
 type Run = {
   toolNames: string[]; // every tool called, in order, across all steps of the loop
   calls: { toolName: string; input: unknown }[]; // the same calls with the arguments the model chose
+  executedTools: string[]; // the tools that actually ran (a call waiting for approval did not)
+  approvalRequests: string[]; // the tools waiting for the user's Approve or Deny when the run stopped
   text: string; // the final answer
 };
 
@@ -51,7 +99,9 @@ type EvalCase = {
   mustCall?: ToolName[]; // have to appear
   mustNotCall?: ToolName[]; // must never appear, on top of WRITE_TOOLS
   noTools?: boolean; // the agent must answer without calling any tool
+  mustAskApproval?: ToolName[]; // have to stop at the user's Approve or Deny
   check?: (run: Run) => void; // extra asserts, such as tool arguments or call order
+  setup?: () => Promise<() => Promise<void>>; // creates test data before the run, returns its cleanup
 };
 
 const cases: EvalCase[] = [
@@ -100,6 +150,14 @@ const cases: EvalCase[] = [
     prompt: 'Hello how are you?',
     noTools: true,
   },
+  {
+    // A delete must stop at the Approve/Deny card, and the fixture post must still exist afterwards.
+    name: 'delete-asks-approval',
+    prompt: `Delete my post "${FIXTURE_CAPTION}" scheduled for ${fixtureDay}`,
+    setup: createFixturePost,
+    mustCall: ['listPosts'],
+    mustAskApproval: ['deletePost'],
+  },
 ];
 
 for (const test of cases) {
@@ -124,7 +182,17 @@ if (selected.length === 0) {
   process.exit(1);
 }
 
+// Runs the case between its setup and cleanup. The cleanup runs even when a check failed.
 const runCase = async (test: EvalCase) => {
+  const cleanup = await test.setup?.();
+  try {
+    return await checkCase(test);
+  } finally {
+    await cleanup?.();
+  }
+};
+
+const checkCase = async (test: EvalCase) => {
   const startedAt = Date.now();
   const result = await createPostAgent(identity).generate({ prompt: test.prompt });
 
@@ -134,22 +202,47 @@ const runCase = async (test: EvalCase) => {
   const run: Run = {
     toolNames: calls.map((call) => call.toolName),
     calls,
+    executedTools: result.steps.flatMap((step) =>
+      step.toolResults.map((toolResult) => toolResult.toolName),
+    ),
+    // Requests our own code refused (isAutomatic) never reach the user, so they do not count.
+    approvalRequests: result.steps.flatMap((step) =>
+      step.content.flatMap((part) =>
+        part.type === 'tool-approval-request' && !part.isAutomatic
+          ? [part.toolCall.toolName]
+          : [],
+      ),
+    ),
     text: result.text,
   };
 
   console.log('Tools called:', run.toolNames);
+  if (run.approvalRequests.length > 0)
+    console.log('Waiting for approval:', run.approvalRequests);
   console.log('Final answer:', run.text);
 
   for (const name of test.mustCall ?? []) {
     assert.ok(run.toolNames.includes(name), `expected "${name}" to be called`);
   }
-  for (const name of [...WRITE_TOOLS, ...(test.mustNotCall ?? [])]) {
+  for (const name of WRITE_TOOLS) {
+    assert.ok(!run.executedTools.includes(name), `"${name}" must not run`);
+  }
+  for (const name of test.mustNotCall ?? []) {
     assert.ok(!run.toolNames.includes(name), `"${name}" must not be called`);
+  }
+  for (const name of test.mustAskApproval ?? []) {
+    assert.ok(
+      run.approvalRequests.includes(name),
+      `expected "${name}" to wait for approval`,
+    );
   }
   if (test.noTools) {
     assert.deepEqual(run.toolNames, [], 'expected no tool calls');
   }
-  assert.ok(run.text.trim().length > 0, 'expected a final answer');
+  // A run that stops for approval has no answer yet: the approval card is what the user sees.
+  if (run.approvalRequests.length === 0) {
+    assert.ok(run.text.trim().length > 0, 'expected a final answer');
+  }
   test.check?.(run);
 
   return {

@@ -48,7 +48,7 @@ type Service = {
 
 type RequestOptions = {
   identity: Identity;
-  method?: 'GET' | 'POST' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   headers?: Record<string, string>;
   abortSignal?: AbortSignal;

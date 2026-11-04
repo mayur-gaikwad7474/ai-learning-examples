@@ -10,5 +10,6 @@ router.get('/', conversationController.listConversations);
 router.post('/', conversationController.createConversation);
 router.get('/:id', conversationController.getConversation);
 router.post('/:id/messages', conversationController.sendMessage);
+router.post('/:id/approvals', conversationController.answerApproval);
 
 export default router;

@@ -2,7 +2,13 @@ import { ToolLoopAgent } from 'ai';
 import { model } from '../model.ts';
 import type { Identity } from '../schemas/identity.schema.ts';
 import { listAccounts } from '../tools/accounts.tools.ts';
-import { editPost, listPosts, schedulePost } from '../tools/posts.tools.ts';
+import {
+  deletePost,
+  deletePostApproval,
+  editPost,
+  listPosts,
+  schedulePost,
+} from '../tools/posts.tools.ts';
 import { currentTime } from '../tools/currentTime.tool.ts';
 
 // Must be exactly the same on every turn of a conversation, so nothing here may change per request.
@@ -13,6 +19,7 @@ const INSTRUCTIONS = [
   'When you call the account list or post list tool with showToUser: true, the app shows the results to the user as cards. Account cards show the name, platform and whether it needs reconnecting. Post cards show the time, status, accounts, caption, per-account result and errors. Do not list the accounts or posts again in your reply. Write one or two sentences instead: a short summary (how many, what stands out), anything that needs attention (an account to reconnect, a failed post), or what the user can do next.',
   'After you schedule or edit a post successfully, the app shows a confirmation card with the account, time, caption, media and what changed. Do not repeat those details. Confirm in one short sentence, and mention anything the card cannot say, such as a problem with another post in the same request.',
   'If a detail for a post is missing, ask for it instead of making it up.',
+  'To delete a post, find it with the post list tool, then call the delete post tool once per post. The app shows the user an approval card with Approve and Deny buttons, so do not ask for confirmation yourself, and never say a post was deleted unless the delete tool returned success. If the post was published, say it stays live on the social platform, because deleting only removes it from the Creatosaurus calendar.',
   'When the user attaches images or videos, their message lists them under "Attached media" with a mediaId. Pass those IDs as mediaIds when scheduling, and never invent a media ID.',
   "also your work is to assist based on the tools you available and we don't have to entertain user with any other information that is not related to the tools and the task at hand.",
 ].join('\n');
@@ -26,6 +33,7 @@ const tools = {
   currentTime: currentTime,
   listPosts: listPosts,
   editPost: editPost,
+  deletePost: deletePost,
 };
 
 export type PostAgentTools = typeof tools;
@@ -42,7 +50,11 @@ export const createPostAgent = (identity: Identity) =>
       accountList: identity,
       listPosts: identity,
       editPost: identity,
+      deletePost: identity,
     },
+    // A delete cannot be undone, so the run stops at every deletePost call and waits for the
+    // user's answer (see conversation.service.ts). The next run executes it only if approved.
+    toolApproval: { deletePost: deletePostApproval },
 
     onStepStart({ stepNumber, modelId }) {
       console.log(`Step ${stepNumber} starting`, { modelId });

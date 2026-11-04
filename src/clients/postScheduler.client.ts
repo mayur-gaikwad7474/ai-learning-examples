@@ -3,6 +3,7 @@ import type { Identity } from '../schemas/identity.schema.ts';
 import {
   calendarPageResponseSchema,
   createdPostResponseSchema,
+  deletedPostResponseSchema,
   updatedPostResponseSchema,
 } from '../schemas/posts.schema.ts';
 import type {
@@ -89,6 +90,22 @@ export const updateScheduledPost = async (
       },
       abortSignal,
     },
+  );
+  return body.data;
+};
+
+// Removes the post from every account in the calendar and cancels its queued publish. A post that
+// was already published stays live on its platforms: removing it there is a separate endpoint.
+export const deleteScheduledPost = async (
+  identity: Identity,
+  postId: string,
+  abortSignal?: AbortSignal,
+) => {
+  const query = new URLSearchParams({ workspaceId: identity.workspaceId });
+  const body = await request(
+    `/v1/posts/${encodeURIComponent(postId)}?${query}`,
+    deletedPostResponseSchema,
+    { identity, method: 'DELETE', abortSignal },
   );
   return body.data;
 };

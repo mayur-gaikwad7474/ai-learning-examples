@@ -86,6 +86,12 @@ export const editPostInputSchema = z
     { message: 'Change at least one of caption, scheduledTime or mediaIds.' },
   );
 
+export const deletePostInputSchema = z.object({
+  postId: objectIdSchema.describe(
+    'The ID of the post to delete, taken from the list posts tool.',
+  ),
+});
+
 export const listPostsInputSchema = z
   .object({
     from: z.iso
@@ -148,6 +154,16 @@ export const updatedPostResponseSchema = z.object({
     scheduleTime: z.string().nullable(),
     timeZone: z.string().nullable(),
     scheduled: z.boolean(),
+  }),
+});
+
+// DELETE /v1/posts/:postId answers with what it did. `cancelledSchedule` is true when a queued
+// publish was removed along with the post.
+export const deletedPostResponseSchema = z.object({
+  data: z.object({
+    id: z.string(),
+    deleted: z.literal(true),
+    cancelledSchedule: z.boolean(),
   }),
 });
 

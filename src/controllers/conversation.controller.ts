@@ -2,13 +2,18 @@
 // errorHandler, so there is no try/catch here, except where a streamed reply has already started.
 import type { Request, Response } from 'express';
 import {
+  answerApprovalBodySchema,
   conversationParamsSchema,
   sendMessageBodySchema,
 } from '../schemas/conversation.schema.ts';
 import { getIdentity } from '../middleware/requireIdentity.ts';
 import { HttpError } from '../middleware/errorHandler.ts';
 import * as conversationService from '../services/conversation.service.ts';
-import type { AgentEvent } from '../services/conversation.service.ts';
+import type {
+  AgentEvent,
+  SendEvent,
+  TurnReply,
+} from '../services/conversation.service.ts';
 
 export const listConversations = async (_req: Request, res: Response) => {
   const conversations = await conversationService.listConversations(
@@ -33,17 +38,20 @@ export const getConversation = async (req: Request, res: Response) => {
   res.json(conversation);
 };
 
-type Reply = Awaited<ReturnType<typeof conversationService.sendMessage>>;
-
 type StreamEvent =
-  AgentEvent | ({ type: 'done' } & Reply) | { type: 'error'; message: string };
+  | AgentEvent
+  | ({ type: 'done' } & TurnReply)
+  | { type: 'error'; message: string };
+
+type RunTurn = (
+  abortSignal: AbortSignal,
+  send: SendEvent,
+) => Promise<TurnReply>;
 
 // The app asks for a stream with `Accept: application/x-ndjson` and gets one JSON event per line as
 // the agent works, ending with `done` (the saved answer) or `error`. Any other request gets the
 // whole reply as JSON once it is ready, as before.
-export const sendMessage = async (req: Request, res: Response) => {
-  const { id } = conversationParamsSchema.parse(req.params);
-  const body = sendMessageBodySchema.parse(req.body);
+const replyToTurn = async (req: Request, res: Response, runTurn: RunTurn) => {
   const streaming = req.get('Accept') === 'application/x-ndjson';
 
   // If the browser closes the request, stop the agent so we don't keep paying for the reply.
@@ -64,13 +72,7 @@ export const sendMessage = async (req: Request, res: Response) => {
   };
 
   if (!streaming) {
-    const reply = await conversationService.sendMessage(
-      getIdentity(res),
-      id,
-      body,
-      abortController.signal,
-      () => {},
-    );
+    const reply = await runTurn(abortController.signal, () => {});
     res.json(reply);
     return;
   }
@@ -78,13 +80,7 @@ export const sendMessage = async (req: Request, res: Response) => {
   // The one try/catch in the controllers: once the stream has started, the status code is already
   // sent, so a failure can only be reported as the last event.
   try {
-    const reply = await conversationService.sendMessage(
-      getIdentity(res),
-      id,
-      body,
-      abortController.signal,
-      send,
-    );
+    const reply = await runTurn(abortController.signal, send);
     send({ type: 'done', ...reply });
   } catch (error) {
     if (!res.headersSent) throw error;
@@ -101,4 +97,34 @@ export const sendMessage = async (req: Request, res: Response) => {
     }
   }
   res.end();
+};
+
+export const sendMessage = async (req: Request, res: Response) => {
+  const { id } = conversationParamsSchema.parse(req.params);
+  const body = sendMessageBodySchema.parse(req.body);
+  await replyToTurn(req, res, (abortSignal, send) =>
+    conversationService.sendMessage(
+      getIdentity(res),
+      id,
+      body,
+      abortSignal,
+      send,
+    ),
+  );
+};
+
+// Approve or Deny on an approval card. Streams like sendMessage, because approving the last waiting
+// request runs the agent again.
+export const answerApproval = async (req: Request, res: Response) => {
+  const { id } = conversationParamsSchema.parse(req.params);
+  const body = answerApprovalBodySchema.parse(req.body);
+  await replyToTurn(req, res, (abortSignal, send) =>
+    conversationService.answerApproval(
+      getIdentity(res),
+      id,
+      body,
+      abortSignal,
+      send,
+    ),
+  );
 };

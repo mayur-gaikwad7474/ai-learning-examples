@@ -1,7 +1,9 @@
 import { tool } from 'ai';
+import type { InferToolOutput, ModelMessage, ToolApprovalStatus } from 'ai';
 import { identitySchema } from '../schemas/identity.schema.ts';
 import {
   CALENDAR_MAX_WINDOW_DAYS,
+  deletePostInputSchema,
   editPostInputSchema,
   listPostsInputSchema,
   schedulePostInputSchema,
@@ -10,6 +12,7 @@ import { ServiceError } from '../clients/http.ts';
 import { fetchConnectedAccounts } from '../clients/connections.client.ts';
 import {
   createScheduledPost,
+  deleteScheduledPost,
   fetchScheduledPosts,
   updateScheduledPost,
 } from '../clients/postScheduler.client.ts';
@@ -175,6 +178,59 @@ export const editPost = tool({
   },
 });
 
+// What to tell the model when a delete failed. A 4xx message is written for people (post not found,
+// view-only role), so it goes back as a normal result. Otherwise the post may already be deleted,
+// so the model must not simply try again.
+const explainDeleteFailure = (
+  error: unknown,
+): { success: false; error: string } => {
+  if (!(error instanceof ServiceError)) throw error;
+
+  switch (error.kind) {
+    case 'rejected':
+      return { success: false, error: error.message };
+    case 'unreachable':
+      throw new Error(
+        'Could not reach the post scheduler. The post may or may not have been deleted, so ask the user to check their calendar before trying again.',
+      );
+    case 'failed':
+      throw new Error(
+        `The post scheduler failed (status ${error.status}). The post may or may not have been deleted, so ask the user to check their calendar before trying again.`,
+      );
+    case 'unreadable':
+      throw new Error(
+        'The post scheduler sent a response that could not be read. Ask the user to check their calendar.',
+      );
+  }
+};
+
+// Never runs on its own: the agent's toolApproval (deletePostApproval below) makes every call wait
+// for the user's Approve or Deny in the app, and this runs only after Approve.
+export const deletePost = tool({
+  description: [
+    'Delete one post from the Creatosaurus calendar of the current workspace, whether it is scheduled, a draft, failed or published. A scheduled post will no longer go out.',
+    'Deleting a published post only removes it from the calendar: it stays live on the social platform.',
+    'Get the post ID from the list posts tool; never guess one. Delete one post per call.',
+    'The app asks the user to approve every delete with buttons, so call this tool directly instead of asking "are you sure?" in your reply.',
+  ].join(' '),
+  inputSchema: deletePostInputSchema,
+  contextSchema: identitySchema,
+  execute: async ({ postId }, { context, abortSignal }) => {
+    let deleted;
+    try {
+      deleted = await deleteScheduledPost(context, postId, abortSignal);
+    } catch (error) {
+      return explainDeleteFailure(error);
+    }
+
+    return {
+      success: true as const,
+      postId: deleted.id,
+      cancelledSchedule: deleted.cancelledSchedule,
+    };
+  },
+});
+
 // Legacy calendar statuses, turned into words the model can repeat to people.
 const POST_STATUS_LABELS: Record<string, string> = {
   queue: 'scheduled',
@@ -264,3 +320,67 @@ export const listPosts = tool({
     },
   }),
 });
+
+type ListedPost = Extract<
+  InferToolOutput<typeof listPosts>,
+  { success: true }
+>['posts'][number];
+
+// A post as the model saw it in a list posts result: the toModelOutput version above, where media
+// is only each file's type.
+export type ModelListedPost = Omit<ListedPost, 'media'> & { media: string[] };
+
+// The post with this ID in the newest list posts result of the history, or null when the model was
+// never shown it. The history holds only the model's version of each result (see toModelOutput).
+export const findListedPost = (
+  messages: ModelMessage[],
+  postId: string,
+): ModelListedPost | null => {
+  for (const message of messages.toReversed()) {
+    if (message.role !== 'tool') continue;
+    for (const part of message.content) {
+      if (
+        part.type !== 'tool-result' ||
+        part.toolName !== 'listPosts' ||
+        part.output.type !== 'json'
+      )
+        continue;
+      // Written by toModelOutput above, so it has this shape.
+      const { posts } = part.output.value as { posts: ModelListedPost[] };
+      const post = posts.find((candidate) => candidate.id === postId);
+      if (post) return post;
+    }
+  }
+  return null;
+};
+
+// A post post-scheduler is sending right now shows as finished with an account still pending.
+// Deleting it then can still let it go out while it disappears from the calendar.
+const isPublishing = (post: ModelListedPost) =>
+  post.status === 'finished' &&
+  post.accounts.some((account) => account.status === 'pending');
+
+// Runs before every deletePost call, in our code, so the model cannot skip it. Calls that are
+// already wrong are refused with a reason the model reads; every other call waits for the user's
+// Approve or Deny. The user approves the post they were shown, so the ID must come from a list.
+export const deletePostApproval = (
+  { postId }: { postId: string },
+  { messages }: { messages: ModelMessage[] },
+): ToolApprovalStatus => {
+  const post = findListedPost(messages, postId);
+  if (!post) {
+    return {
+      type: 'denied',
+      reason:
+        'Not deleted: this post ID was not in a list posts result. Find the post with the list posts tool first, then delete it by the ID shown there.',
+    };
+  }
+  if (isPublishing(post)) {
+    return {
+      type: 'denied',
+      reason:
+        'Not deleted: this post is being published right now. Tell the user to try again in a few minutes, once it has finished.',
+    };
+  }
+  return 'user-approval';
+};

@@ -4,11 +4,18 @@
 // tool results come back before the next step. We walk the steps in order and keep:
 //   - text the model wrote, as `text` parts
 //   - list results the model marked showToUser: true, as card parts
-//   - posts it scheduled or edited, as confirmation cards
+//   - posts it scheduled, edited or deleted, as confirmation cards
+//   - deletes waiting for the user's answer, as approval cards
 // Everything else (results it only needed for another step, failed calls, other tools) stays out.
-import type { StepResult, TypedToolResult } from 'ai';
+import type {
+  ModelMessage,
+  StepResult,
+  ToolApprovalRequestOutput,
+  TypedToolResult,
+} from 'ai';
 import type { PostAgentTools } from '../agents/postScheduler.agent.ts';
 import type { DisplayPart } from '../schemas/conversation.schema.ts';
+import { findListedPost } from '../tools/posts.tools.ts';
 
 type PostAgentStep = StepResult<PostAgentTools>;
 
@@ -72,14 +79,68 @@ export const toCardPart = (part: ToolResultPart): DisplayPart | null => {
     };
   }
 
+  if (part.toolName === 'deletePost') {
+    const { output } = part;
+    if (!output.success) return null;
+    return {
+      type: 'deletedPost',
+      postId: output.postId,
+      cancelledSchedule: output.cancelledSchedule,
+    };
+  }
+
   return null;
 };
 
-export const toDisplayParts = (steps: PostAgentStep[]): DisplayPart[] => {
+// The card for a delete waiting for the user. `messages` is the history up to and including this
+// run, where the list posts result the model took the ID from can be found. Requests our code
+// already refused (isAutomatic) show no card: the model explains them in its text.
+const toApprovalPart = (
+  request: ToolApprovalRequestOutput<PostAgentTools>,
+  messages: ModelMessage[],
+): DisplayPart | null => {
+  const { toolCall } = request;
+  if (request.isAutomatic || toolCall.dynamic) return null;
+  if (toolCall.toolName !== 'deletePost') return null;
+
+  const post = findListedPost(messages, toolCall.input.postId);
+  if (!post) return null;
+
+  return {
+    type: 'deleteApproval',
+    approvalId: request.approvalId,
+    postId: post.id,
+    post: {
+      status: post.status,
+      scheduledTime: post.scheduledTime,
+      timeZone: post.timeZone,
+      mediaCount: post.media.length,
+      accounts: post.accounts.map((account) => ({
+        name: account.name,
+        platform: account.platform,
+        profileURL: account.profileURL,
+        caption: account.caption,
+        status: account.status,
+      })),
+    },
+    decision: 'pending',
+  };
+};
+
+export const toDisplayParts = (
+  steps: PostAgentStep[],
+  messages: ModelMessage[],
+): DisplayPart[] => {
   const parts: DisplayPart[] = [];
 
   for (const step of steps) {
     for (const content of step.content) {
+      if (content.type === 'tool-approval-request') {
+        const card = toApprovalPart(content, messages);
+        if (card) parts.push(card);
+        continue;
+      }
+
       if (content.type === 'text') {
         const text = content.text.trim();
         if (!text) continue;

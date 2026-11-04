@@ -39,8 +39,15 @@ export const sendMessageBodySchema = z
     },
   );
 
+// The user's Approve or Deny on an approval card.
+export const answerApprovalBodySchema = z.object({
+  approvalId: z.string().min(1).max(100),
+  approved: z.boolean(),
+});
+
 export type Attachment = z.infer<typeof attachmentSchema>;
 export type SendMessageBody = z.infer<typeof sendMessageBodySchema>;
+export type AnswerApprovalBody = z.infer<typeof answerApprovalBodySchema>;
 
 // ── Display parts (what the app renders) ────────────────────────────────────────────────────────
 // An assistant answer is a list of parts in the order they happened: text the model wrote, and
@@ -80,7 +87,35 @@ export type DisplayPart =
         time: boolean;
         mediaCount: number | null;
       };
-    };
+    }
+  // A delete waiting for the user's Approve or Deny, and later what happened to it. The post is the
+  // list posts result the model took the ID from, so the user approves the post they were shown.
+  //   approved  the user approved; a deletedPost card follows when the delete worked
+  //   denied    the user denied, nothing was deleted
+  //   expired   the user sent a new message instead of answering, nothing was deleted
+  | {
+      type: 'deleteApproval';
+      approvalId: string;
+      postId: string;
+      post: {
+        status: string;
+        scheduledTime: string | null;
+        timeZone: string | null;
+        mediaCount: number;
+        accounts: {
+          name: string;
+          platform: string;
+          profileURL: string | null;
+          caption: string;
+          status: string;
+        }[];
+      };
+      decision: ApprovalDecision;
+    }
+  // Confirmation after a post was deleted.
+  | { type: 'deletedPost'; postId: string; cancelledSchedule: boolean };
+
+export type ApprovalDecision = 'pending' | 'approved' | 'denied' | 'expired';
 
 // ── Database (MongoDB) ──────────────────────────────────────────────────────────────────────────
 
