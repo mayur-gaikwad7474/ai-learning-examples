@@ -39,7 +39,7 @@ When a lesson's boxes are all ticked, tick it in **Progress** below.
 - [x] 5. Structured output
 - [x] 6. Preventing infinite loops
 - [x] 7. Streaming
-- [ ] 8. Conversational threads
+- [x] 8. Conversational threads
 - [ ] 9. Runtime context
 - [ ] 10. Context engineering and memory
 - [ ] 11. Embeddings and RAG
@@ -307,26 +307,43 @@ a label while each tool runs, and its Stop button closes the request, which abor
 ## 8. Conversational threads
 
 **Learn**
-- [ ] Models remember nothing between calls
-- [ ] Sending history every turn
-- [ ] UI messages vs model messages
+- [x] Models remember nothing between calls
+- [x] Sending history every turn
+- [x] UI messages vs model messages
 - [x] Saving display parts next to the model history, with a fallback for messages saved before parts existed
-- [ ] Saving and resuming threads
-- [ ] Keeping threads per user
-- [ ] Why long threads get expensive
+- [x] Saving and resuming threads
+- [x] Keeping threads per user
+- [x] Why long threads get expensive
 
-**AI SDK:** `messages`, `ModelMessage`, `UIMessage`, `convertToModelMessages`, `result.response.messages`.
+**AI SDK:** `messages`, `ModelMessage`, `UIMessage`, `convertToModelMessages`, `result.responseMessages`
+(`result.response.messages` is deprecated in `ai@7`).
 
 **Build**
-- [ ] A terminal chat with the weather agent where "and tomorrow?" works. Save the thread to a JSON file and resume it after restarting.
+- [x] A terminal chat with the weather agent where "and tomorrow?" works. Save the thread to a JSON file and resume it after restarting.
 
 **Done when**
-- [ ] You can explain why relevant history must be supplied on each call, and why it need not include every past turn
-- [ ] You can save and resume a thread
+- [x] You can explain why relevant history must be supplied on each call, and why it need not include every past turn
+- [x] You can save and resume a thread
 
-**Record (2026-11-01):** each conversation in MongoDB keeps `messages` (the model history, never sent to the
-browser) and `display` (what people see). Assistant answers in `display` now save `parts`; answers saved
-before that get `[{ type: 'text', text }]` in `toDisplay` (`src/services/conversation.service.ts`).
+**Record (2026-11-22):** marked done from the notes in `notes/08-conversational-threads.md`. The Build was
+done in the app instead of the terminal, with MongoDB instead of a JSON file. The 2026-11-01 design (separate
+`messages` and `display` lists) has been replaced: both projects now save one list of AI SDK UI messages,
+which the app shows and the server converts for the model on each turn.
+- This project: `src/services/conversation.service.ts` and `src/schemas/conversation.schema.ts`. `useChat`
+  sends only the newest message, the server adds it to the saved conversation and saves the whole
+  conversation in `onFinish`, every query is scoped by `ownedBy(identity)`, and `lockedUntil` allows one
+  answer at a time.
+- `ai-service`: one document per message (`chatMessages`), and `toAgentHistory` in
+  `src/services/chatHistory.ts`. It reads at most 40 messages within a 30,000-token budget, drops reasoning
+  and unfinished tool calls, and skips saved messages that no longer match the tools. Tests:
+  `chatHistory.test.ts`, `chats.test.ts`.
+
+Remaining limitations in this project (`ai-service` already handles each one):
+- The whole saved conversation is sent every turn, with no message or token limit.
+- Saved messages are checked against today's tools on every turn, and one that fails throws, so a tool
+  input change can break old chats.
+- The conversation is one MongoDB document, which a very long chat could push towards the 16 MB limit.
+- It uses `onFinish`, which `ai@7` deprecates in favour of `onEnd`.
 
 ## 9. Runtime context
 
